@@ -68,7 +68,11 @@
   entry         ; the ENTRY being described (:info only)
   (readable t)  ; NIL when the directory could not be read (:dir only)
   (sel nil)     ; selected row index, or NIL
-  (scroll 0))   ; vertical scroll offset in px, >= 0
+  (scroll 0)    ; vertical scroll offset in px, >= 0
+  ;; image-preview cache (:info only): decoded ONCE per selection, since a fresh
+  ;; :info column is built on every selection change (see select-in-column).
+  (preview nil)        ; a decoded pigment:img, or NIL
+  (preview-status nil)); NIL untried / :ok / :not-image / :fail / :too-big
 
 (defun make-dir-column (path)
   "A :dir column for directory PATH, contents listed and sorted."
@@ -101,3 +105,46 @@
         (if (and type (plusp (length type)))
             (format nil "~:@(~A~) file" type)
             "Document"))))
+
+;;; ---------------------------------------------------------------------------
+;;; Image previews — decode a selected image file to a thumbnail (via pigment)
+;;; ---------------------------------------------------------------------------
+(defparameter +image-types+ '("png" "jpg" "jpeg" "gif" "webp" "bmp" "svg")
+  "File extensions warren tries to show as a decoded bitmap in the info pane.")
+
+(defparameter *preview-max-bytes* (* 24 1024 1024)
+  "Skip preview decode for image files larger than this (bytes) so selecting a huge
+   file can't stall the repaint pump; those fall back to the doc glyph.")
+
+(defun image-file-p (entry)
+  "True when ENTRY's extension is one warren previews as a bitmap."
+  (and (not (entry-dir-p entry))
+       (let ((type (pathname-type (entry-path entry))))
+         (and type (member type +image-types+ :test #'string-equal)))))
+
+(defun %read-file-bytes (path)
+  (with-open-file (s path :element-type '(unsigned-byte 8))
+    (let ((b (make-array (file-length s) :element-type '(unsigned-byte 8))))
+      (read-sequence b s) b)))
+
+(defun ensure-preview (col)
+  "Lazily decode COL's (:info) file into a cached preview pigment:img — ONCE per
+   selection (the column is rebuilt whenever the selection changes, so this never
+   runs per-paint).  Robust: a non-image, an over-large file, or a corrupt/unsupported
+   image all resolve to a status the drawer falls back on, never signalling.
+   Returns the img (or NIL); sets (column-preview-status col)."
+  (when (and (eq (column-kind col) :info) (null (column-preview-status col)))
+    (let ((entry (column-entry col)))
+      (if (not (image-file-p entry))
+          (setf (column-preview-status col) :not-image)
+          (handler-case
+              (if (> (or (entry-size entry) 0) *preview-max-bytes*)
+                  (setf (column-preview-status col) :too-big)
+                  (let ((img (pigment:decode-image-bytes
+                              (%read-file-bytes (entry-path entry)))))
+                    (if (and img (plusp (pigment:img-w img)) (plusp (pigment:img-h img)))
+                        (setf (column-preview col) img
+                              (column-preview-status col) :ok)
+                        (setf (column-preview-status col) :fail))))
+            (error () (setf (column-preview-status col) :fail))))))
+  (column-preview col))

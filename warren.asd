@@ -7,7 +7,7 @@ any VNC client, and single-click navigation builds cascading directory columns."
   :version "0.1.0"
   :author "ynniv"
   :license "MIT"
-  :depends-on ("gesso" "glass" "scribe")
+  :depends-on ("gesso" "glass" "scribe" "pigment")
   :serial t
   :components
   ((:module "src"
