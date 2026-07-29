@@ -1,0 +1,4 @@
+*.fasl
+.cache/
+# rendered screenshots (regenerate with tests.lisp)
+/shots/*.png
