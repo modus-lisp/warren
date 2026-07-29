@@ -118,14 +118,14 @@
     (gesso:restore ctx)))
 
 (defun draw-image-preview (ctx col-x img)
-  "Draw the decoded IMG (a pigment:img, straight-alpha RGBA) as a thumbnail in the
-   info pane: fit inside a centered box, aspect preserved (never stretched), with a
-   1px hairline border.  gesso:draw-image-rgba maps the source into the unit square
+  "Draw the pre-scaled thumbnail IMG (a pigment:img, straight-alpha RGBA) in the info
+   pane: fit inside a centered box, aspect preserved (never stretched), with a 1px
+   hairline border.  gesso:draw-image-rgba maps the source into the unit square
    [0,1]^2 of the CURRENT user space with v=1 at image row 0; warren's canvas is
    top-down, so we translate to the box BOTTOM and use a negative Y scale to flip it
    upright (mirrors the y-up convention draw-image-rgba documents)."
   (let* ((iw (pigment:img-w img)) (ih (pigment:img-h img))
-         (bx (+ col-x 16)) (by 16) (bw (- +col-w+ 32)) (bh 150)
+         (bx (+ col-x 16)) (by 16) (bw +preview-box-w+) (bh +preview-box-h+)
          (s (min (/ bw iw) (/ bh ih) 4d0))          ; fit; cap upscale at 4x
          (dw (* iw s)) (dh (* ih s))
          (dx (+ bx (/ (- bw dw) 2d0)))
@@ -142,35 +142,50 @@
     (gesso:fill-rect ctx (- dx 1) (- dy 1) 1 (+ dh 2))          ; left
     (gesso:fill-rect ctx (+ dx dw) (- dy 1) 1 (+ dh 2))))       ; right
 
+(defun draw-preview-loading (ctx col-x)
+  "A light placeholder shown while an image preview decodes on the worker thread —
+   so selecting a big image never blocks the pump; the real thumbnail pops in later."
+  (let* ((bx (+ col-x 16)) (by 16) (bw +preview-box-w+) (bh +preview-box-h+))
+    (gesso:set-fill ctx '(238 238 238))
+    (gesso:fill-rect ctx bx by bw bh)
+    (gesso:set-fill ctx +hairline+)
+    (gesso:fill-rect ctx bx by bw 1) (gesso:fill-rect ctx bx (+ by bh -1) bw 1)
+    (gesso:fill-rect ctx bx by 1 bh) (gesso:fill-rect ctx (+ bx bw -1) by 1 bh)
+    (gesso:set-fill ctx +muted-color+)
+    (gesso:set-font ctx 11d0 :family *font-family*)
+    (let ((tw (gesso:measure-text ctx "Loading preview…")))
+      (gesso:fill-text ctx "Loading preview…"
+                       (+ bx (/ (- bw tw) 2d0)) (+ by (/ bh 2d0) 4)))))
+
 (defun draw-info-column (ctx col col-x view-h)
-  "Draw a trailing :info panel for a selected file: a real image thumbnail when the
-   file is a decodable image (name / kind / size / dimensions), else the generic
-   document glyph (name / kind / size)."
+  "Draw a trailing :info panel for a selected file.  Reads the (async) preview status
+   only — NEVER decodes: :ok -> the real thumbnail (name / kind / size / dimensions),
+   :loading -> a placeholder, else the generic document glyph (name / kind / size)."
   (let* ((ch (content-height view-h))
          (entry (column-entry col))
          (x (+ col-x +row-pad+ 4))
-         (img (ensure-preview col))
          (status (column-preview-status col))
-         (previewed (and img (eq status :ok))))
+         (pv (column-preview col))
+         (previewed (and (eq status :ok) (pv-p pv))))
     (gesso:set-fill ctx +column-bg+)
     (gesso:fill-rect ctx col-x 0 +col-w+ ch)
-    (if previewed
-        (draw-image-preview ctx col-x img)
-        ;; big centered document glyph (non-image, or decode fell back)
-        (progn
-          (let ((gx (+ col-x (/ (- +col-w+ 48) 2d0))))
-            (gesso:save ctx)
-            (gesso:translate ctx gx 34)
-            (gesso:scale ctx 3d0 3d0)
-            (draw-file ctx 0 0)
-            (gesso:restore ctx))
-          (when (member status '(:fail :too-big))
-            (gesso:set-fill ctx +muted-color+)
-            (gesso:set-font ctx 10d0 :family *font-family*)
-            (gesso:fill-text ctx (if (eq status :too-big) "preview too large"
-                                     "preview unavailable")
-                             (+ col-x +row-pad+) 100))))
-    (let ((y (if previewed 190 118)))
+    (cond
+      (previewed (draw-image-preview ctx col-x (pv-img pv)))
+      ((eq status :loading) (draw-preview-loading ctx col-x))
+      (t
+       (let ((gx (+ col-x (/ (- +col-w+ 48) 2d0))))
+         (gesso:save ctx)
+         (gesso:translate ctx gx 34)
+         (gesso:scale ctx 3d0 3d0)
+         (draw-file ctx 0 0)
+         (gesso:restore ctx))
+       (when (member status '(:fail :too-big))
+         (gesso:set-fill ctx +muted-color+)
+         (gesso:set-font ctx 10d0 :family *font-family*)
+         (gesso:fill-text ctx (if (eq status :too-big) "preview too large"
+                                  "preview unavailable")
+                          (+ col-x +row-pad+) 100))))
+    (let ((y (if (or previewed (eq status :loading)) 190 118)))
       (gesso:set-fill ctx +text-color+)
       (gesso:set-font ctx 14d0 :family *font-family* :weight 600)
       (gesso:fill-text ctx (fit-text ctx (entry-name entry) (- +col-w+ 24))
@@ -187,7 +202,7 @@
         (line "Kind" (file-kind entry))
         (line "Size" (human-size (entry-size entry)))
         (when previewed
-          (line "Dimensions" (format nil "~D × ~D" (pigment:img-w img) (pigment:img-h img))))))))
+          (line "Dimensions" (format nil "~D × ~D" (pv-ow pv) (pv-oh pv))))))))
 
 (defun current-path-string (columns)
   "The full path of the active selection (for the path bar), or the root path."

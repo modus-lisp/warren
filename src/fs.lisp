@@ -109,12 +109,26 @@
 ;;; ---------------------------------------------------------------------------
 ;;; Image previews — decode a selected image file to a thumbnail (via pigment)
 ;;; ---------------------------------------------------------------------------
+;;; Decoding is ASYNC (see app.lisp START-PREVIEW): the functions here run OFF the
+;;; app lock on a worker thread — read bytes, cheap dimension pre-probe, full decode,
+;;; then pre-scale to the pane box so the input/pump thread never touches a decode.
 (defparameter +image-types+ '("png" "jpg" "jpeg" "gif" "webp" "bmp" "svg")
   "File extensions warren tries to show as a decoded bitmap in the info pane.")
 
 (defparameter *preview-max-bytes* (* 24 1024 1024)
-  "Skip preview decode for image files larger than this (bytes) so selecting a huge
-   file can't stall the repaint pump; those fall back to the doc glyph.")
+  "Skip preview decode for image files larger than this (bytes) so a huge file can't
+   burn a decode; those fall back to the doc glyph.")
+
+(defparameter *preview-max-megapixels* 40
+  "Reject (without a full decode) images whose header reports more than this many
+   megapixels — the cheap dimension pre-probe guards the worst stalls.")
+
+(defparameter +preview-box-w+ 198 "Preview thumbnail box width in px (+col-w+ - 32).")
+(defparameter +preview-box-h+ 150 "Preview thumbnail box height in px.")
+
+;;; A resolved :ok preview: a small PRE-SCALED thumbnail img + the ORIGINAL pixel
+;;; dimensions (shown in the info text).  Failures are cached as bare keywords.
+(defstruct pv img ow oh)
 
 (defun image-file-p (entry)
   "True when ENTRY's extension is one warren previews as a bitmap."
@@ -127,24 +141,58 @@
     (let ((b (make-array (file-length s) :element-type '(unsigned-byte 8))))
       (read-sequence b s) b)))
 
-(defun ensure-preview (col)
-  "Lazily decode COL's (:info) file into a cached preview pigment:img — ONCE per
-   selection (the column is rebuilt whenever the selection changes, so this never
-   runs per-paint).  Robust: a non-image, an over-large file, or a corrupt/unsupported
-   image all resolve to a status the drawer falls back on, never signalling.
-   Returns the img (or NIL); sets (column-preview-status col)."
-  (when (and (eq (column-kind col) :info) (null (column-preview-status col)))
-    (let ((entry (column-entry col)))
-      (if (not (image-file-p entry))
-          (setf (column-preview-status col) :not-image)
-          (handler-case
-              (if (> (or (entry-size entry) 0) *preview-max-bytes*)
-                  (setf (column-preview-status col) :too-big)
-                  (let ((img (pigment:decode-image-bytes
-                              (%read-file-bytes (entry-path entry)))))
-                    (if (and img (plusp (pigment:img-w img)) (plusp (pigment:img-h img)))
-                        (setf (column-preview col) img
-                              (column-preview-status col) :ok)
-                        (setf (column-preview-status col) :fail))))
-            (error () (setf (column-preview-status col) :fail))))))
-  (column-preview col))
+(defun probe-image-size (bytes)
+  "A CHEAP (values W H) from a PNG (IHDR) or JPEG (SOF) header without decoding any
+   pixels, or NIL when unknown — lets the worker reject absurd-megapixel images before
+   paying a full decode."
+  (cond
+    ((and (>= (length bytes) 24) (= (aref bytes 0) 137) (= (aref bytes 1) 80)
+          (= (aref bytes 12) 73) (= (aref bytes 13) 72)                 ; "IHDR"
+          (= (aref bytes 14) 68) (= (aref bytes 15) 82))
+     (flet ((u32 (o) (+ (ash (aref bytes o) 24) (ash (aref bytes (+ o 1)) 16)
+                        (ash (aref bytes (+ o 2)) 8) (aref bytes (+ o 3)))))
+       (values (u32 16) (u32 20))))
+    ((and (>= (length bytes) 3) (= (aref bytes 0) #xff) (= (aref bytes 1) #xd8))
+     (ignore-errors (pigment:jpeg-size bytes)))
+    (t (values nil nil))))
+
+(defun prescale-img (img box-w box-h)
+  "A NEW small pigment:img, nearest-neighbour scaled so IMG fits BOX-W x BOX-H (aspect
+   preserved, upscale capped at 4x).  Pre-scaling once here means the paint path never
+   re-samples a huge source per frame."
+  (let* ((iw (pigment:img-w img)) (ih (pigment:img-h img))
+         (src (pigment:img-rgba img))
+         (s (min (/ box-w iw) (/ box-h ih) 4d0))
+         (dw (max 1 (round (* iw s)))) (dh (max 1 (round (* ih s))))
+         (out (make-array (* dw dh 4) :element-type '(unsigned-byte 8))))
+    (dotimes (y dh)
+      (let ((sy (min (1- ih) (floor (* y ih) dh))))
+        (dotimes (x dw)
+          (let ((si (* 4 (+ (* sy iw) (min (1- iw) (floor (* x iw) dw)))))
+                (di (* 4 (+ (* y dw) x))))
+            (setf (aref out di)       (aref src si)
+                  (aref out (+ di 1)) (aref src (+ si 1))
+                  (aref out (+ di 2)) (aref src (+ si 2))
+                  (aref out (+ di 3)) (aref src (+ si 3)))))))
+    (pigment:make-img :w dw :h dh :rgba out)))
+
+(defun decode-preview-thumb (path box-w box-h)
+  "OFF-LOCK worker body: decode the image at PATH and pre-scale it to fit BOX-W x
+   BOX-H.  Returns a PV (a resolved :ok thumbnail) or a keyword — :too-big (over the
+   byte / megapixel caps) or :fail (unreadable / corrupt / unsupported).  Never
+   signals — the caller only needs to store the result."
+  (handler-case
+      (let ((size (ignore-errors (with-open-file (s path :element-type '(unsigned-byte 8))
+                                   (file-length s)))))
+        (if (and size (> size *preview-max-bytes*))
+            :too-big
+            (let ((bytes (%read-file-bytes path)))
+              (multiple-value-bind (pw ph) (probe-image-size bytes)
+                (if (and pw ph (> (* pw ph) (* *preview-max-megapixels* 1000000)))
+                    :too-big
+                    (let ((img (pigment:decode-image-bytes bytes)))
+                      (if (and img (plusp (pigment:img-w img)) (plusp (pigment:img-h img)))
+                          (make-pv :img (prescale-img img box-w box-h)
+                                   :ow (pigment:img-w img) :oh (pigment:img-h img))
+                          :fail)))))))
+    (error () :fail)))

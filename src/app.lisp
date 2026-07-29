@@ -17,7 +17,11 @@
   (buttons 0)              ; last RFB button mask (low 3 bits)
   (lock (sb-thread:make-mutex :name "warren"))
   (dirty t)
-  (running t))
+  (running t)
+  ;; async image-preview state (see START-PREVIEW): decode runs on a worker thread,
+  ;; results land here under the lock.  Both keyed by the file's namestring.
+  (preview-cache (make-hash-table :test 'equal))     ; path -> a PV (:ok) or :fail/:too-big
+  (preview-inflight (make-hash-table :test 'equal))) ; path -> T while a worker is decoding it
 
 ;;; ---------------------------------------------------------------------------
 ;;; Horizontal auto-scroll
@@ -42,6 +46,52 @@
 ;;; ---------------------------------------------------------------------------
 ;;; The core interaction: single-click select / truncate / append
 ;;; ---------------------------------------------------------------------------
+;;; ---------------------------------------------------------------------------
+;;; Async image-preview decoding (mirrors loom glass-shell's MAYBE-WARM-LAZY:
+;;; decode OFF the lock on a worker, store under the lock, mark dirty)
+;;; ---------------------------------------------------------------------------
+(defun start-preview (app col)
+  "Kick off (or reuse) the preview decode for the :info COL's image file.  MUST run
+   under the app lock (the input path already holds it).  A cache hit resolves the
+   column instantly; otherwise the column shows :loading and a worker thread decodes
+   OFF the lock.  Coalesced: a path already decoding (or cached) spawns no new worker.
+   Stale-safe: the worker fills a PATH-keyed cache and only touches whichever :info
+   column is CURRENT when it finishes, so a newer selection is never clobbered."
+  (let* ((path (namestring (column-path col)))
+         (hit (gethash path (app-preview-cache app))))
+    (cond
+      (hit                                                     ; cached -> instant
+       (if (pv-p hit)
+           (setf (column-preview col) hit (column-preview-status col) :ok)
+           (setf (column-preview-status col) hit)))            ; :fail / :too-big
+      (t
+       (setf (column-preview-status col) :loading)
+       (unless (gethash path (app-preview-inflight app))       ; coalesce duplicate decodes
+         (setf (gethash path (app-preview-inflight app)) t)
+         (sb-thread:make-thread
+          (lambda ()
+            ;; the ENTIRE worker body is guarded: a decode failure OR any later error
+            ;; resolves to :fail and can never crash the thread (or, via a shared lock,
+            ;; the host).  UNWIND-PROTECT guarantees the inflight flag is always cleared.
+            (let ((result (or (ignore-errors
+                                (decode-preview-thumb path +preview-box-w+ +preview-box-h+)) ; OFF the lock
+                              :fail)))
+              (ignore-errors
+               (sb-thread:with-mutex ((app-lock app))
+                 (unwind-protect
+                      (progn
+                        (setf (gethash path (app-preview-cache app)) result)
+                        ;; apply only to the CURRENTLY-shown :info column for this path
+                        (let ((cur (car (last (app-columns app)))))
+                          (when (and cur (eq (column-kind cur) :info)
+                                     (string= (namestring (column-path cur)) path))
+                            (if (pv-p result)
+                                (setf (column-preview cur) result (column-preview-status cur) :ok)
+                                (setf (column-preview-status cur) result))))
+                        (setf (app-dirty app) t))
+                   (remhash path (app-preview-inflight app)))))))
+          :name "warren-preview"))))))
+
 (defun select-in-column (app col-index row-index)
   "Select ROW-INDEX in column COL-INDEX: set the selection, discard every column to
    the right, then append the child column — the directory's contents if the row is
@@ -55,12 +105,14 @@
           (let ((entry (nth row-index entries)))
             (setf (column-sel col) row-index)
             ;; drop everything to the right of this column
-            (let ((kept (subseq columns 0 (1+ col-index))))
-              (setf (app-columns app)
-                    (nconc kept
-                           (list (if (entry-dir-p entry)
-                                     (make-dir-column (entry-path entry))
-                                     (make-info-column entry))))))
+            (let* ((kept (subseq columns 0 (1+ col-index)))
+                   (child (if (entry-dir-p entry)
+                              (make-dir-column (entry-path entry))
+                              (make-info-column entry))))
+              (setf (app-columns app) (nconc kept (list child)))
+              ;; an image file kicks an ASYNC decode (never blocks this input path)
+              (when (and (eq (column-kind child) :info) (image-file-p entry))
+                (start-preview app child)))
             (ensure-column-visible app (1- (length (app-columns app))))
             (setf (app-dirty app) t)
             t))))))
