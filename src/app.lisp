@@ -192,6 +192,50 @@
     (gesso:write-png (app-ctx app) path))
   path)
 
+;;; ---------------------------------------------------------------------------
+;;; Embeddable surface — render into a framebuffer the HOST owns (a WM window)
+;;; ---------------------------------------------------------------------------
+;;; DESKTOP-SURFACE mirrors loom's glass-shell ATTACH: the host (e.g. the glass
+;;; McCLIM window manager) supplies a framebuffer sized to the window, and warren
+;;; builds its app-state over THAT fb instead of owning a server + pump thread.
+;;; We hand back the three closures the host's surface contract needs — on-key,
+;;; on-pointer, dirty-p — all bound to that fb.  No glass:serve, no pump thread,
+;;; no McCLIM/CLIM dependency: warren only touches glass + gesso + its own code.
+;;; The host forwards RFB input to on-key/on-pointer and calls dirty-p each frame;
+;;; dirty-p repaints into the fb (like the terminal's take-dirty) and reports T
+;;; when the pixels changed, so the compositor recomposites only on real change.
+
+(defun surface-take-dirty (app)
+  "The host compositor's per-frame poll: if input has dirtied the view, repaint the
+   gesso canvas into the host's framebuffer and return T (clearing the flag); else
+   NIL.  Replaces warren's own pump loop when embedded — no background thread."
+  (sb-thread:with-mutex ((app-lock app))
+    (when (app-dirty app)
+      (paint app)
+      (setf (app-dirty app) nil)
+      t)))
+
+(defun desktop-surface (fb &key root)
+  "Build a warren file browser rendering into the PROVIDED framebuffer FB (its size
+   is the window's content size) rooted at ROOT (default: the home directory), and
+   return (values ON-KEY ON-POINTER DIRTY-P) — the glass WM surface contract:
+
+     ON-KEY     (down keysym) -> ()    forward an RFB key event
+     ON-POINTER (mask x y)    -> ()    forward an RFB pointer event (window-local x,y)
+     DIRTY-P    ()            -> bool   repaint into FB if dirtied; T iff pixels changed
+
+   The host decorates + composites FB, forwards input to the first two, and polls the
+   third each frame.  Nothing here owns a server or a thread, so ANY glass compositor
+   can host warren as a window (this is what clim-glass's (:surface …) spec calls)."
+  (let* ((w (glass:fb-width fb)) (h (glass:fb-height fb))
+         (app (make-browser :root root :width w :height h)))
+    (setf (app-fb app) fb)
+    (sb-thread:with-mutex ((app-lock app)) (paint app))   ; seed the fb so the window isn't blank
+    (values
+     (lambda (down keysym) (on-key app down keysym))
+     (lambda (mask x y)    (on-pointer app mask x y))
+     (lambda ()            (surface-take-dirty app)))))
+
 (defun run (&key (port 5900) root (width 1000) (height 640) max-iterations background)
   "Open a Finder-style column file browser rooted at ROOT (default: the home
    directory) and serve it over VNC on PORT.  Runs the pump loop on the calling
