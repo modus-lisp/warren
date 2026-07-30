@@ -176,10 +176,21 @@
                             (+ (column-scroll col) (* delta +row-h+ 3)))))
           (setf (app-dirty app) t))))))
 
+(defparameter +hscroll-step+ 60 "Px the columns pan per horizontal-wheel notch.")
+
+(defun scroll-horizontal (app dir)
+  "Horizontally pan the columns by DIR (-1 = left, +1 = right) one wheel notch,
+   clamped to the scrollable range (mirrors scroll-under-pointer for the vertical axis)."
+  (incf (app-hscroll app) (* dir +hscroll-step+))
+  (clamp-hscroll app)
+  (setf (app-dirty app) t))
+
 (defun on-pointer (app mask x y)
   (sb-thread:with-mutex ((app-lock app))
     (when (logtest mask 8)  (scroll-under-pointer app x y -1))  ; wheel up
     (when (logtest mask 16) (scroll-under-pointer app x y  1))  ; wheel down
+    (when (logtest mask 32) (scroll-horizontal app -1))         ; wheel left
+    (when (logtest mask 64) (scroll-horizontal app  1))         ; wheel right
     (let ((press-edge (and (logtest mask 1) (not (logtest (app-buttons app) 1)))))
       (setf (app-buttons app) (logand mask 7)
             (app-px app) x (app-py app) y)
