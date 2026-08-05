@@ -13,6 +13,7 @@
                     :pigment :clim-examples :clim-listener))   ; vncauth = DES via seal
     (ignore-errors (asdf:load-system :loom/glass))            ; the browser (optional)
     (ignore-errors (asdf:load-system :warren))                ; the file browser (async previews)
+    (ignore-errors (asdf:load-system :glass/audio-stream))    ; the session's sound (optional)
     (asdf:load-asd "/home/claude/glass/backend/mcclim-glass.asd")
     (asdf:load-system :mcclim-glass)))
 
@@ -38,8 +39,11 @@
                        (sb-bsd-sockets:socket-accept listen)
                        :input t :output t :element-type 'character :buffering :full)))
                (unwind-protect
-                    (let ((*package* (find-package :clim-glass))
-                          (form (read s nil nil)))
+                    ;; let* — not let: the form must be READ with *package* already bound to
+                    ;; clim-glass, otherwise symbols resolve in whatever package the thread has
+                    ;; (CL-USER) and every unqualified clim-glass symbol fails to intern.
+                    (let* ((*package* (find-package :clim-glass))
+                           (form (read s nil nil)))
                       (when form
                         (write-string
                          (handler-case (princ-to-string (eval form))
@@ -60,6 +64,15 @@
 (let ((wp (namestring (merge-pathnames "assets/wallpaper.svg"
                                        (asdf:system-source-directory :mcclim-glass)))))
   (start-control-socket 4013)
+  ;; The session's sound, on its own port beside the screen: one mixer here, and any number of
+  ;; listeners in other processes (the WebRTC gateway is one) subscribing to the same mix.  It
+  ;; belongs on THIS side because this is the process the desktop's applications run in — a
+  ;; transport that made its own mix would carry only what that transport's clients caused.
+  ;; Found by name, so a build without :glass/audio-stream still starts a desktop.
+  (let ((start (find-symbol "START-SESSION-AUDIO" :glass)))
+    (if (and start (fboundp start))
+        (funcall start :port 5913 :address "127.0.0.1")
+        (format *error-output* "~&@@ audio: :glass/audio-stream not loaded — no session sound~%")))
   (format *error-output* "~&@@ glass desktop serving on 0.0.0.0:5903 (~a)~%" wp)
   (format *error-output* "@@ control socket on 127.0.0.1:4013~%")
   (finish-output *error-output*)
