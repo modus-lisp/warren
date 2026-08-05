@@ -15,7 +15,8 @@
     (ignore-errors (asdf:load-system :warren))                ; the file browser (async previews)
     (ignore-errors (asdf:load-system :glass/audio-stream))    ; the session's sound (optional)
     (asdf:load-asd "/home/claude/glass/backend/mcclim-glass.asd")
-    (asdf:load-system :mcclim-glass)))
+    (asdf:load-system :mcclim-glass)
+    (ignore-errors (asdf:load-system :spool/app))))           ; the podcast client (optional)
 
 (setf glass:*desktop-name* "modus-lisp :: glass desktop (:3)")
 
@@ -26,6 +27,11 @@
    (clim-glass:register-app "File Browser"
      (list :surface (symbol-function (find-symbol "DESKTOP-SURFACE" :warren))
            :title "Files" :width 1000 :height 640))))
+
+;;; Same for the podcast client, which registers itself (SPOOL.APP:REGISTER looks
+;;; CLIM-GLASS up by name, so the system also loads in an image without a desktop).
+(when (find-package :spool.app)
+  (ignore-errors (funcall (find-symbol "REGISTER" :spool.app))))
 
 ;;; Bare-TCP control/eval socket on 127.0.0.1:4013 — read one form, eval it in the
 ;;; clim-glass package, write the printed result (same protocol as :5901's 4009).
@@ -71,7 +77,11 @@
   ;; Found by name, so a build without :glass/audio-stream still starts a desktop.
   (let ((start (find-symbol "START-SESSION-AUDIO" :glass)))
     (if (and start (fboundp start))
-        (funcall start :port 5913 :address "127.0.0.1")
+        ;; :FILE NIL — the desktop's sound is whatever an app plays into the mix (spool, say),
+        ;; not a track the startup loops on its own.  START-SESSION-AUDIO otherwise defaults
+        ;; :FILE to $GLASS_AUDIO_MP3, which would resurrect the loop on any restart that
+        ;; inherited it.
+        (funcall start :port 5913 :address "127.0.0.1" :file nil)
         (format *error-output* "~&@@ audio: :glass/audio-stream not loaded — no session sound~%")))
   (format *error-output* "~&@@ glass desktop serving on 0.0.0.0:5903 (~a)~%" wp)
   (format *error-output* "@@ control socket on 127.0.0.1:4013~%")
