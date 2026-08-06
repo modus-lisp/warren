@@ -14,7 +14,7 @@
     (ignore-errors (asdf:load-system :loom/glass))            ; the browser (optional)
     (ignore-errors (asdf:load-system :warren))                ; the file browser (async previews)
     (ignore-errors (asdf:load-system :glass/audio-stream))    ; the session's sound (optional)
-    (ignore-errors (asdf:load-system :glass/speech))          ; and its voice, via quill (optional)
+    (ignore-errors (asdf:load-system :glass/speech))          ; and its voice, via chord (optional)
     (asdf:load-asd "/home/claude/glass/backend/mcclim-glass.asd")
     (asdf:load-system :mcclim-glass)
     (ignore-errors (asdf:load-system :mcclim-glass/speak))    ; type-and-say window (optional)
@@ -90,12 +90,12 @@
         ;; inherited it.
         (funcall start :port 5913 :address "127.0.0.1" :file nil)
         (format *error-output* "~&@@ audio: :glass/audio-stream not loaded — no session sound~%")))
-  ;; The voice (glass/src/speech.lisp): quill as one long-lived source on the same mix, so a
+  ;; The voice (glass/src/speech.lisp): chord as one long-lived source on the same mix, so a
   ;; SPEAK over the control socket is heard by every listener the session already has.  The path
   ;; is filled in only if :glass/speech loaded AND the voice is on this box; GLASS_VOICE still
   ;; wins, and leaving it NIL is what makes SPEAK say "no voice" instead of failing obscurely.
   (let ((var (find-symbol "*SPEECH-VOICE*" :glass))
-        (here "/mnt/lisp/quill/export/en_US-lessac-medium.graph"))
+        (here "/mnt/lisp/chord/export/en_US-lessac-medium.graph"))
     (when (and var (boundp var) (null (symbol-value var)) (probe-file here))
       (setf (symbol-value var) here)))
   (format *error-output* "~&@@ glass desktop serving on 0.0.0.0:5903 (~a)~%" wp)
