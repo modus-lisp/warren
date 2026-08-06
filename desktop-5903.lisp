@@ -14,6 +14,7 @@
     (ignore-errors (asdf:load-system :loom/glass))            ; the browser (optional)
     (ignore-errors (asdf:load-system :warren))                ; the file browser (async previews)
     (ignore-errors (asdf:load-system :glass/audio-stream))    ; the session's sound (optional)
+    (ignore-errors (asdf:load-system :glass/speech))          ; and its voice, via quill (optional)
     (asdf:load-asd "/home/claude/glass/backend/mcclim-glass.asd")
     (asdf:load-system :mcclim-glass)
     (ignore-errors (asdf:load-system :spool/app))))           ; the podcast client (optional)
@@ -83,8 +84,19 @@
         ;; inherited it.
         (funcall start :port 5913 :address "127.0.0.1" :file nil)
         (format *error-output* "~&@@ audio: :glass/audio-stream not loaded — no session sound~%")))
+  ;; The voice (glass/src/speech.lisp): quill as one long-lived source on the same mix, so a
+  ;; SPEAK over the control socket is heard by every listener the session already has.  The path
+  ;; is filled in only if :glass/speech loaded AND the voice is on this box; GLASS_VOICE still
+  ;; wins, and leaving it NIL is what makes SPEAK say "no voice" instead of failing obscurely.
+  (let ((var (find-symbol "*SPEECH-VOICE*" :glass))
+        (here "/mnt/lisp/quill/export/en_US-lessac-medium.graph"))
+    (when (and var (boundp var) (null (symbol-value var)) (probe-file here))
+      (setf (symbol-value var) here)))
   (format *error-output* "~&@@ glass desktop serving on 0.0.0.0:5903 (~a)~%" wp)
   (format *error-output* "@@ control socket on 127.0.0.1:4013~%")
+  (format *error-output* "@@ voice: ~:[none — set GLASS_VOICE~;~:*~a~]~%"
+          (let ((var (find-symbol "*SPEECH-VOICE*" :glass)))
+            (and var (boundp var) (symbol-value var))))
   (finish-output *error-output*)
   (clim-glass:run-wm '((:terminal :cols 80 :rows 24 :ppem 14))
                      :port 5903 :width 1280 :height 800
