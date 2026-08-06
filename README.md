@@ -3,11 +3,9 @@
 A macOS Finder–style **Miller column** file browser, written from scratch in pure
 Common Lisp. Directories cascade left-to-right as columns; a single click on a
 folder opens its contents in a new column to the right. The UI is drawn with
-[gesso](../gesso) (antialiased 2D vector graphics), packed into a
-[glass](../glass) framebuffer, and served over VNC — no FFI, no X, no toolkit.
-
-> **Name is a working title.** `warren` is a placeholder; rename the system and
-> package to whatever you prefer.
+[gesso](https://github.com/modus-lisp/gesso) (antialiased 2D vector graphics),
+packed into a [glass](https://github.com/modus-lisp/glass) framebuffer, and
+served over VNC — no FFI, no X, no toolkit.
 
 ## What it is
 
@@ -54,11 +52,19 @@ a column to include them.
 `tests.lisp` runs the model assertions and writes three sample screenshots to
 `shots/`.
 
+`desktop-5903.lisp` is not part of the library — it is the author's own launcher,
+kept here because it is the only worked example of warren living inside a full
+[glass](https://github.com/modus-lisp/glass) desktop alongside other apps. Its
+paths are machine-specific; read it, don't run it.
+
 ## Dependencies
 
-- [gesso](../gesso) — 2D vector drawing (paths, fills, text via scribe)
-- [glass](../glass) — in-memory framebuffer + from-scratch VNC/RFB server
-- [scribe](../scribe) — font shaping / rasterization (pulled in by gesso)
+- [gesso](https://github.com/modus-lisp/gesso) — 2D vector drawing (paths, fills,
+  text via scribe)
+- [glass](https://github.com/modus-lisp/glass) — in-memory framebuffer +
+  from-scratch VNC/RFB server
+- [scribe](https://github.com/modus-lisp/scribe) — font shaping / rasterization
+  (pulled in by gesso)
 
 ## Architecture
 
