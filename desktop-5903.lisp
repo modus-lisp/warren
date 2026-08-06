@@ -40,26 +40,15 @@
 (when (find-package :glass-speak)
   (ignore-errors (funcall (find-symbol "REGISTER" :glass-speak))))
 
-;;; "Speak selection" / "Stop speaking" — the desktop reads its own clipboard.
+;;; "Speak selection" / "Stop speaking" are NOT registered here any more.  They were
+;;; root-menu items, which put them on the workspace background: to have the desktop
+;;; read something you had to select it, then leave it — travel out of the window,
+;;; past whatever was on top, to the bare wallpaper, and right-click there.  The menu
+;;; was as far as it could possibly be from the thing it was about.
 ;;;
-;;; This belongs at the desktop level and not inside any one app, because the
-;;; clipboard is what the session shares: the browser is only the first thing on
-;;; this desktop that declares a selection, and every later one gets read-aloud for
-;;; free without knowing that speech exists.  Select text in the browser (which owns
-;;; the clipboard the moment you let go, X11 PRIMARY style) and pick this.
-;;;
-;;; Speaking is queued and unbounded, so a long article really does read as a long
-;;; article; "Stop speaking" is how you take it back.
-(when (and (find-package :clim-glass) (find-symbol "SPEAK" :glass))
-  (ignore-errors
-   (clim-glass:register-app "Speak selection"
-     (lambda ()
-       (let ((text (glass:clipboard-text (glass:session-clipboard))))
-         (glass:hush)                       ; a new selection replaces what is being said
-         (glass:speak (if (and text (plusp (length text)))
-                          text
-                          "Nothing is selected.")))))
-   (clim-glass:register-app "Stop speaking" (lambda () (glass:hush)))))
+;;; The WM now offers them where the words are: right-click INSIDE the window holding
+;;; the selection and the same two items come up under the pointer (glass's
+;;; WM-OPEN-SELECTION-MENU).  One way to do this, and it is the near one.
 
 ;;; Bare-TCP control/eval socket on 127.0.0.1:4013 — read one form, eval it in the
 ;;; clim-glass package, write the printed result (same protocol as :5901's 4009).
