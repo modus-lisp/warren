@@ -17,6 +17,7 @@
     (ignore-errors (asdf:load-system :glass/speech))          ; and its voice, via quill (optional)
     (asdf:load-asd "/home/claude/glass/backend/mcclim-glass.asd")
     (asdf:load-system :mcclim-glass)
+    (ignore-errors (asdf:load-system :mcclim-glass/speak))    ; type-and-say window (optional)
     (ignore-errors (asdf:load-system :spool/app))))           ; the podcast client (optional)
 
 (setf glass:*desktop-name* "modus-lisp :: glass desktop (:3)")
@@ -33,6 +34,11 @@
 ;;; CLIM-GLASS up by name, so the system also loads in an image without a desktop).
 (when (find-package :spool.app)
   (ignore-errors (funcall (find-symbol "REGISTER" :spool.app))))
+
+;;; And the window that types into the desktop's voice — also self-registering, and
+;;; absent when glass/speech didn't load (a desktop with no voice, not a broken one).
+(when (find-package :glass-speak)
+  (ignore-errors (funcall (find-symbol "REGISTER" :glass-speak))))
 
 ;;; Bare-TCP control/eval socket on 127.0.0.1:4013 — read one form, eval it in the
 ;;; clim-glass package, write the printed result (same protocol as :5901's 4009).
