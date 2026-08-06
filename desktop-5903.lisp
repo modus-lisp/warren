@@ -40,15 +40,20 @@
 (when (find-package :glass-speak)
   (ignore-errors (funcall (find-symbol "REGISTER" :glass-speak))))
 
-;;; "Speak selection" / "Stop speaking" are NOT registered here any more.  They were
-;;; root-menu items, which put them on the workspace background: to have the desktop
-;;; read something you had to select it, then leave it — travel out of the window,
-;;; past whatever was on top, to the bare wallpaper, and right-click there.  The menu
-;;; was as far as it could possibly be from the thing it was about.
+;;; Nothing about speech is registered here any more, because the WM offers both halves
+;;; of it in the place each one belongs, and it does so on every glass desktop rather
+;;; than only on this one.
 ;;;
-;;; The WM now offers them where the words are: right-click INSIDE the window holding
-;;; the selection and the same two items come up under the pointer (glass's
-;;; WM-OPEN-SELECTION-MENU).  One way to do this, and it is the near one.
+;;; Right-click INSIDE a window that has text highlighted and "Speak selection" comes up
+;;; under the pointer, over the words, and says exactly what is highlighted right now
+;;; (glass's WM-OPEN-SELECTION-MENU).  Dismiss the highlight and the menu is gone with
+;;; it — there is no selection, so there is nothing to offer about one.
+;;;
+;;; Right-click the workspace and the root menu ends with "Speak clipboard", which reads
+;;; whatever was last COPIED (glass's WM-CLIPBOARD-MENU-ITEMS).  That one is the
+;;; session's rather than any window's, which is why it is reachable from the bare
+;;; background where there is no window to ask — and why it still has something to say
+;;; after the highlight it came from is gone.
 
 ;;; Bare-TCP control/eval socket on 127.0.0.1:4013 — read one form, eval it in the
 ;;; clim-glass package, write the printed result (same protocol as :5901's 4009).
