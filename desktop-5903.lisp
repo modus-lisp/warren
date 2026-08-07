@@ -14,10 +14,13 @@
     (ignore-errors (asdf:load-system :loom/glass))            ; the browser (optional)
     (ignore-errors (asdf:load-system :warren))                ; the file browser (async previews)
     (ignore-errors (asdf:load-system :glass/audio-stream))    ; the session's sound (optional)
+    (ignore-errors (asdf:load-system :glass/mic-stream))      ; ...and a peer's microphone, inbound
     (ignore-errors (asdf:load-system :glass/speech))          ; and its voice, via chord (optional)
+    (ignore-errors (asdf:load-system :glass/hearing))         ; and its ear, via stave (optional)
     (asdf:load-asd "/home/claude/glass/backend/mcclim-glass.asd")
     (asdf:load-system :mcclim-glass)
     (ignore-errors (asdf:load-system :mcclim-glass/speak))    ; type-and-say window (optional)
+    (ignore-errors (asdf:load-system :mcclim-glass/listen))   ; ...and the one that fills itself in
     (ignore-errors (asdf:load-system :spool/app))))           ; the podcast client (optional)
 
 (setf glass:*desktop-name* "modus-lisp :: glass desktop (:3)")
@@ -39,6 +42,12 @@
 ;;; absent when glass/speech didn't load (a desktop with no voice, not a broken one).
 (when (find-package :glass-speak)
   (ignore-errors (funcall (find-symbol "REGISTER" :glass-speak))))
+
+;;; And its mirror: press Listen and the box fills up with what the session is saying.  Same
+;;; mixer as the voice, from the other end — which is why this desktop can hear itself talk, on a
+;;; box whose only audio hardware is four HDMI playbacks and no capture device at all.
+(when (find-package :glass-listen)
+  (ignore-errors (funcall (find-symbol "REGISTER" :glass-listen))))
 
 ;;; Nothing about speech is registered here any more, because the WM offers both halves
 ;;; of it in the place each one belongs, and it does so on every glass desktop rather
@@ -105,6 +114,14 @@
         ;; inherited it.
         (funcall start :port 5913 :address "127.0.0.1" :file nil)
         (format *error-output* "~&@@ audio: :glass/audio-stream not loaded — no session sound~%")))
+  ;; The other direction (glass/src/mic-stream.lisp): a peer's microphone, arriving from the
+  ;; WebRTC gateway on the port beside the mix's.  It is NOT put in the mix — it would be played
+  ;; back out of the desktop's own audio and down 5913 to the phone that said it — it is offered
+  ;; to whoever asks, which today is the ear.  Found by name, so a build without it still starts.
+  (let ((start (find-symbol "START-SESSION-MIC" :glass)))
+    (if (and start (fboundp start))
+        (funcall start :port 5914 :address "127.0.0.1")
+        (format *error-output* "~&@@ mic: :glass/mic-stream not loaded — no peer microphone~%")))
   ;; The voice (glass/src/speech.lisp): chord as one long-lived source on the same mix, so a
   ;; SPEAK over the control socket is heard by every listener the session already has.  The path
   ;; is filled in only if :glass/speech loaded AND the voice is on this box; GLASS_VOICE still
@@ -113,10 +130,20 @@
         (here "/mnt/lisp/chord/export/en_US-lessac-medium.graph"))
     (when (and var (boundp var) (null (symbol-value var)) (probe-file here))
       (setf (symbol-value var) here)))
+  ;; The ear (glass/src/hearing.lisp): stave as one SINK on that same mix.  Filled in the same
+  ;; way and for the same reason — GLASS_EARS wins, and NIL is what makes the Listen window say
+  ;; "no ear installed" instead of failing obscurely.  Nothing is loaded until something listens.
+  (let ((var (find-symbol "*HEARING-MODELS*" :glass))
+        (here "/mnt/lisp/stave/export/"))
+    (when (and var (boundp var) (null (symbol-value var)) (probe-file here))
+      (setf (symbol-value var) here)))
   (format *error-output* "~&@@ glass desktop serving on 0.0.0.0:5903 (~a)~%" wp)
   (format *error-output* "@@ control socket on 127.0.0.1:4013~%")
   (format *error-output* "@@ voice: ~:[none — set GLASS_VOICE~;~:*~a~]~%"
           (let ((var (find-symbol "*SPEECH-VOICE*" :glass)))
+            (and var (boundp var) (symbol-value var))))
+  (format *error-output* "@@ ears:  ~:[none — set GLASS_EARS~;~:*~a~]~%"
+          (let ((var (find-symbol "*HEARING-MODELS*" :glass)))
             (and var (boundp var) (symbol-value var))))
   (finish-output *error-output*)
   (clim-glass:run-wm '((:terminal :cols 80 :rows 24 :ppem 14))
