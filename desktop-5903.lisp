@@ -22,6 +22,14 @@
                                     (make-pathname :name nil :type nil
                                                    :defaults *load-truename*)))
     (asdf:load-system :mcclim-glass)
+    ;; The root menu offers "Editor (Climacs)", and WM-EDIT resolves it by name at
+    ;; click time — so if nobody loads it the menu item is a promise the image
+    ;; cannot keep, and the only sign of it is one line in the log.  It is a menu
+    ;; entry: load what it opens.  Via mcclim-glass/climacs rather than :climacs
+    ;; directly, because bare climacs comes up as a white box you cannot type in
+    ;; and then dies a second after the first thing it says; that system is
+    ;; climacs plus the upstream fixes for exactly that.
+    (ignore-errors (asdf:load-system :mcclim-glass/climacs))
     (ignore-errors (asdf:load-system :mcclim-glass/speak))    ; type-and-say window (optional)
     (ignore-errors (asdf:load-system :mcclim-glass/listen))   ; ...and the one that fills itself in
     (ignore-errors (asdf:load-system :spool/app))))           ; the podcast client (optional)
