@@ -14,11 +14,13 @@
 
 (format t "~%== model tests ==~%")
 
-;; Build a browser rooted at /home/claude.
-(let* ((root #p"/home/claude/")
+;; Build a browser rooted at the workspace.
+(defparameter *ws*                                ; the workspace holding the sibling repos
+  (merge-pathnames "../" (make-pathname :name nil :type nil :defaults *load-truename*)))
+(let* ((root *ws*)
        (app (make-browser :root root :width 1000 :height 640)))
 
-  ;; 1. one column at start, listing /home/claude
+  ;; 1. one column at start, listing the workspace
   (check (= 1 (length (app-columns app))) "starts with a single root column")
   (check (plusp (length (column-entries (first (app-columns app))))) "root column is non-empty")
 
@@ -74,7 +76,7 @@
 
   ;; 7. hit-test maps a device point back to (column,row) via on-pointer.
   ;; Row 0 is the first entry (a directory, since dirs sort first) and always visible.
-  (let* ((app2 (make-browser :root #p"/home/claude/" :width 1000 :height 640))
+  (let* ((app2 (make-browser :root *ws* :width 1000 :height 640))
          (e0 (first (column-entries (first (app-columns app2)))))
          (yc 12))                          ; vertical center of row 0
     (check (entry-dir-p e0) "row 0 of the root is a directory")
@@ -85,20 +87,22 @@
            "synthetic click set the row-0 selection")))
 
 (format t "~%== rendering PNGs ==~%")
-(let ((shots "/home/claude/warren/shots/"))
+(let ((shots (merge-pathnames "shots/"          ; beside this file, in the checkout
+                              (make-pathname :name nil :type nil
+                                             :defaults *load-truename*))))
   (ensure-directories-exist shots)
   ;; (a) initial home view
-  (let ((app (make-browser :root #p"/home/claude/" :width 1000 :height 640)))
+  (let ((app (make-browser :root *ws* :width 1000 :height 640)))
     (render-to-png app (merge-pathnames "home.png" shots))
     (format t "  wrote home.png~%"))
-  ;; (b) 3-column deep navigation: /home/claude -> reed -> src
-  (let ((app (make-browser :root #p"/home/claude/" :width 1000 :height 640)))
+  ;; (b) 3-column deep navigation: <workspace> -> reed -> src
+  (let ((app (make-browser :root *ws* :width 1000 :height 640)))
     (select-in-column app 0 (idx-of (first (app-columns app)) "reed"))
     (select-in-column app 1 (idx-of (second (app-columns app)) "src"))
     (render-to-png app (merge-pathnames "deep.png" shots))
     (format t "  wrote deep.png~%"))
   ;; (c) a file selected with its info column
-  (let ((app (make-browser :root #p"/home/claude/" :width 1000 :height 640)))
+  (let ((app (make-browser :root *ws* :width 1000 :height 640)))
     (select-in-column app 0 (idx-of (first (app-columns app)) "reed"))
     (select-in-column app 1 (idx-of (second (app-columns app)) "src"))
     (select-in-column app 2 (idx-of (third (app-columns app)) "mp3"))

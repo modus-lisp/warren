@@ -17,7 +17,10 @@
     (ignore-errors (asdf:load-system :glass/mic-stream))      ; ...and a peer's microphone, inbound
     (ignore-errors (asdf:load-system :glass/speech))          ; and its voice, via chord (optional)
     (ignore-errors (asdf:load-system :glass/hearing))         ; and its ear, via stave (optional)
-    (asdf:load-asd "/home/claude/glass/backend/mcclim-glass.asd")
+    ;; glass's McCLIM backend: a sibling repo, found relative to this file.
+    (asdf:load-asd (merge-pathnames "../glass/backend/mcclim-glass.asd"
+                                    (make-pathname :name nil :type nil
+                                                   :defaults *load-truename*)))
     (asdf:load-system :mcclim-glass)
     (ignore-errors (asdf:load-system :mcclim-glass/speak))    ; type-and-say window (optional)
     (ignore-errors (asdf:load-system :mcclim-glass/listen))   ; ...and the one that fills itself in
