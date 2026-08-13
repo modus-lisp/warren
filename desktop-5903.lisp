@@ -32,7 +32,8 @@
     (ignore-errors (asdf:load-system :mcclim-glass/climacs))
     (ignore-errors (asdf:load-system :mcclim-glass/speak))    ; type-and-say window (optional)
     (ignore-errors (asdf:load-system :mcclim-glass/listen))   ; ...and the one that fills itself in
-    (ignore-errors (asdf:load-system :spool/app))))           ; the podcast client (optional)
+    (ignore-errors (asdf:load-system :spool/app))             ; the podcast client (optional)
+    (ignore-errors (asdf:load-system :mcclim-glass/remote))))  ; other desktops, as windows here
 
 (setf glass:*desktop-name* "modus-lisp :: glass desktop (:3)")
 
@@ -59,6 +60,25 @@
 ;;; box whose only audio hardware is four HDMI playbacks and no capture device at all.
 (when (find-package :glass-listen)
   (ignore-errors (funcall (find-symbol "REGISTER" :glass-listen))))
+
+;;; Other desktops on this box, each as a window here (glass/src/rfb-client.lisp behind
+;;; backend/remote-app.lisp).  Nothing is connected until the menu item is chosen, so an
+;;; entry whose far end is not running costs this desktop nothing but a line in the menu —
+;;; which is why both are registered unconditionally rather than probed for first.
+;;;
+;;; :5905 is cortez (the TI Explorer compatibility layer) and is worth one caveat: it is
+;;; served by a GATE process (sbcl --non-interactive --load inspect/window-gate.lisp), not
+;;; by a persistent desktop.  So that window will show "reconnecting..." whenever the gate
+;;; between runs, and fill back in when the next one starts.  That is the client working,
+;;; not the link failing.
+(when (find-package :glass-remote)
+  (ignore-errors
+   (funcall (find-symbol "REGISTER" :glass-remote)
+            :label "Remote desktop" :host "127.0.0.1" :port 5901))
+  (ignore-errors
+   (funcall (find-symbol "REGISTER" :glass-remote)
+            :label "TI Explorer (:5)" :host "127.0.0.1" :port 5905
+            :width 1100 :height 700)))
 
 ;;; Nothing about speech is registered here any more, because the WM offers both halves
 ;;; of it in the place each one belongs, and it does so on every glass desktop rather
