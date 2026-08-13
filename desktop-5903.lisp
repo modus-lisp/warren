@@ -17,6 +17,7 @@
     (ignore-errors (asdf:load-system :glass/mic-stream))      ; ...and a peer's microphone, inbound
     (ignore-errors (asdf:load-system :glass/speech))          ; and its voice, via chord (optional)
     (ignore-errors (asdf:load-system :glass/hearing))         ; and its ear, via stave (optional)
+    (ignore-errors (asdf:load-system :glass/nostr))           ; the box's identity + the DM bot
     ;; glass's McCLIM backend: a sibling repo, found relative to this file.
     (asdf:load-asd (merge-pathnames "../glass/backend/mcclim-glass.asd"
                                     (make-pathname :name nil :type nil
@@ -153,6 +154,20 @@
     (if (and start (fboundp start))
         (funcall start :port 5914 :address "127.0.0.1")
         (format *error-output* "~&@@ mic: :glass/mic-stream not loaded — no peer microphone~%")))
+  ;; The box's identity and who may reach it (glass/src/nostr.lisp), on the port after the
+  ;; microphone's.  This used to live in the WebRTC gateway, which was the wrong process for the
+  ;; same reason a mixer there would have been: a transport can only speak for the sessions IT
+  ;; carries, and the gateway is the disposable half — it respawns on every config change and
+  ;; crashloops by design without an identity, taking the DM bot with it exactly when you would
+  ;; want to ask the box what is wrong.  This process stays up for days.
+  ;;
+  ;; So the desktop answers the DMs and holds the enrolments, and the gateway asks it.  Which
+  ;; means the failure here is not cosmetic like the ones above: with no admission service the
+  ;; gateway fails CLOSED and nobody can connect at all.  Hence a louder line.
+  (let ((start (find-symbol "START-SESSION-NOSTR" :glass)))
+    (if (and start (fboundp start))
+        (funcall start :port 5915 :address "127.0.0.1")
+        (format *error-output* "~&@@ nostr: :glass/nostr not loaded — NOBODY CAN CONNECT~%")))
   ;; The voice (glass/src/speech.lisp): chord as one long-lived source on the same mix, so a
   ;; SPEAK over the control socket is heard by every listener the session already has.  The path
   ;; is filled in only if :glass/speech loaded AND the voice is on this box; GLASS_VOICE still
