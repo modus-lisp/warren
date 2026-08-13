@@ -3,7 +3,8 @@
 ;;;; A FULL fresh load of the current on-disk stack (hardened glass WM, current gesso
 ;;;; with real DRAW-IMAGE-RGBA — no live shim, warren with async image previews),
 ;;;; mirroring glass/backend/inspect/serve-desktop.lisp but on port 5903 with the
-;;;; warren "File Browser" registered in the root menu.  Point a VNC client at :5903.
+;;;; warren "File Browser" registered in the root menu.  It serves no PORT: the seat's wire
+;;;; is a socket file under ~/.glass/run/, reached by the gateway over loopback-less UNIX.
 ;;;;   sbcl --control-stack-size 256 --dynamic-space-size 4096 --load desktop-5903.lisp
 (require :asdf)
 (load "~/quicklisp/setup.lisp")
@@ -96,17 +97,23 @@
 ;;; background where there is no window to ask — and why it still has something to say
 ;;; after the highlight it came from is gone.
 
-;;; Bare-TCP control/eval socket on 127.0.0.1:4013 — read one form, eval it in the
-;;; clim-glass package, write the printed result (same protocol as :5901's 4009).
-(defun start-control-socket (&optional (port 4013))
+;;; A UNIX SOCKET, not a port, and this is the one that most needed it: read-one-form-and-EVAL
+;;; is unauthenticated by construction, and on 127.0.0.1 its only protection was that you had to
+;;; already be on the box — every uid on it could drive this desktop.  A socket file at 0600 is
+;;; checked by the kernel, and GLASS's accept loop additionally refuses a peer whose uid is not
+;;; ours (SO_PEERCRED), hanging up before the READ rather than after it.
+;;;
+;;;   nc -U ~/.glass/run/seat-0.control
+(defun start-control-socket (&optional (path (glass:socket-path "seat-0.control")))
   (sb-thread:make-thread
    (lambda ()
-     (let ((listen (glass:tcp-listen port :address "127.0.0.1")))
+     (let ((listen (glass:open-listener :unix :path path)))
        (loop
          (handler-case
-             (let ((s (sb-bsd-sockets:socket-make-stream
-                       (sb-bsd-sockets:socket-accept listen)
-                       :input t :output t :element-type 'character :buffering :full)))
+             ;; ACCEPT-STREAM sets :INPUT/:OUTPUT itself and takes only ELEMENT-TYPE, BUFFERING
+             ;; and TIMEOUT — passing the other two is an error that the HANDLER-CASE below
+             ;; swallows, so the symptom is a socket that accepts and then says nothing at all.
+             (let ((s (glass:accept-stream listen :element-type 'character :buffering :full)))
                (unwind-protect
                     ;; let* — not let: the form must be READ with *package* already bound to
                     ;; clim-glass, otherwise symbols resolve in whatever package the thread has
@@ -135,8 +142,11 @@
       ;; One binding for the address, used by both the banner and RUN-WM.  They were two
       ;; literals and the banner kept saying 0.0.0.0 after the bind moved to loopback -- a log
       ;; line that misreports the posture is worse than no log line.
-      (addr "127.0.0.1"))
-  (start-control-socket 4013)
+      ;; The seat's wire is a FILE now, not a port.  Everything else derives from it by name
+      ;; (SOCKET-SIBLING), which is the socket-file reading of the old 5903 -> 5913/5914/5915
+      ;; arithmetic -- kept in glass so the two ends cannot drift apart.
+      (rfb (glass:socket-path "seat-0.rfb")))
+  (start-control-socket (glass:socket-sibling rfb "control"))
   ;; The session's sound, on its own port beside the screen: one mixer here, and any number of
   ;; listeners in other processes (the WebRTC gateway is one) subscribing to the same mix.  It
   ;; belongs on THIS side because this is the process the desktop's applications run in — a
@@ -148,7 +158,7 @@
         ;; not a track the startup loops on its own.  START-SESSION-AUDIO otherwise defaults
         ;; :FILE to $GLASS_AUDIO_MP3, which would resurrect the loop on any restart that
         ;; inherited it.
-        (funcall start :port 5913 :address "127.0.0.1" :file nil)
+        (funcall start :path (glass:socket-sibling rfb "audio") :file nil)
         (format *error-output* "~&@@ audio: :glass/audio-stream not loaded — no session sound~%")))
   ;; The other direction (glass/src/mic-stream.lisp): a peer's microphone, arriving from the
   ;; WebRTC gateway on the port beside the mix's.  It is NOT put in the mix — it would be played
@@ -156,7 +166,7 @@
   ;; to whoever asks, which today is the ear.  Found by name, so a build without it still starts.
   (let ((start (find-symbol "START-SESSION-MIC" :glass)))
     (if (and start (fboundp start))
-        (funcall start :port 5914 :address "127.0.0.1")
+        (funcall start :path (glass:socket-sibling rfb "mic"))
         (format *error-output* "~&@@ mic: :glass/mic-stream not loaded — no peer microphone~%")))
   ;; The box's identity and who may reach it (glass/src/nostr.lisp), on the port after the
   ;; microphone's.  This used to live in the WebRTC gateway, which was the wrong process for the
@@ -170,7 +180,7 @@
   ;; gateway fails CLOSED and nobody can connect at all.  Hence a louder line.
   (let ((start (find-symbol "START-SESSION-NOSTR" :glass)))
     (if (and start (fboundp start))
-        (funcall start :port 5915 :address "127.0.0.1")
+        (funcall start :path (glass:socket-sibling rfb "admit"))
         (format *error-output* "~&@@ nostr: :glass/nostr not loaded — NOBODY CAN CONNECT~%")))
   ;; The voice (glass/src/speech.lisp): chord as one long-lived source on the same mix, so a
   ;; SPEAK over the control socket is heard by every listener the session already has.  The path
@@ -187,8 +197,8 @@
         (here "/mnt/lisp/stave/export/"))
     (when (and var (boundp var) (null (symbol-value var)) (probe-file here))
       (setf (symbol-value var) here)))
-  (format *error-output* "~&@@ glass desktop serving on ~a:5903 (~a)~%" addr wp)
-  (format *error-output* "@@ control socket on 127.0.0.1:4013~%")
+  (format *error-output* "~&@@ glass desktop serving on ~a (~a)~%" rfb wp)
+  (format *error-output* "@@ control socket on ~a~%" (glass:socket-sibling rfb "control"))
   (format *error-output* "@@ voice: ~:[none — set GLASS_VOICE~;~:*~a~]~%"
           (let ((var (find-symbol "*SPEECH-VOICE*" :glass)))
             (and var (boundp var) (symbol-value var))))
@@ -208,5 +218,5 @@
   ;; seat chose — see glass/docs/seats-and-transports.md.
   (clim-glass:run-wm '((:terminal :cols 80 :rows 24 :ppem 14))
                      :port 5903 :width 1280 :height 800
-                     :address addr
+                     :kind :rfb-unix :path rfb
                      :background wp :background-mode :cover))
