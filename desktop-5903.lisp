@@ -192,6 +192,17 @@
           (let ((var (find-symbol "*HEARING-MODELS*" :glass)))
             (and var (boundp var) (symbol-value var))))
   (finish-output *error-output*)
+  ;; LOOPBACK.  This used to bind 0.0.0.0, which meant an unauthenticated desktop on every
+  ;; interface — and not by choice: a VNC password is the only auth RFB offers here, and setting
+  ;; one BREAKS VIDEO, because glass-capture.lisp speaks security type None and would fail to
+  ;; connect while the browser's bridged RFB kept working.  The secure configuration was the
+  ;; broken one, so the posture was open.
+  ;;
+  ;; It closes now because nothing needs it open: the gateway connects over loopback
+  ;; (GLASS_HOST=127.0.0.1), and the WebRTC path has been the only way in for months.  Anything
+  ;; that wants a wire from elsewhere should be a transport a SEAT opens, with a credential the
+  ;; seat chose — see glass/docs/seats-and-transports.md.
   (clim-glass:run-wm '((:terminal :cols 80 :rows 24 :ppem 14))
                      :port 5903 :width 1280 :height 800
+                     :address "127.0.0.1"
                      :background wp :background-mode :cover))
