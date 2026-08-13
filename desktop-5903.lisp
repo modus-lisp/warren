@@ -131,7 +131,11 @@
       (when (plusp (length pw)) (setf glass:*vnc-password* pw)))))
 
 (let ((wp (namestring (merge-pathnames "assets/wallpaper.svg"
-                                       (asdf:system-source-directory :mcclim-glass)))))
+                                       (asdf:system-source-directory :mcclim-glass))))
+      ;; One binding for the address, used by both the banner and RUN-WM.  They were two
+      ;; literals and the banner kept saying 0.0.0.0 after the bind moved to loopback -- a log
+      ;; line that misreports the posture is worse than no log line.
+      (addr "127.0.0.1"))
   (start-control-socket 4013)
   ;; The session's sound, on its own port beside the screen: one mixer here, and any number of
   ;; listeners in other processes (the WebRTC gateway is one) subscribing to the same mix.  It
@@ -183,7 +187,7 @@
         (here "/mnt/lisp/stave/export/"))
     (when (and var (boundp var) (null (symbol-value var)) (probe-file here))
       (setf (symbol-value var) here)))
-  (format *error-output* "~&@@ glass desktop serving on 0.0.0.0:5903 (~a)~%" wp)
+  (format *error-output* "~&@@ glass desktop serving on ~a:5903 (~a)~%" addr wp)
   (format *error-output* "@@ control socket on 127.0.0.1:4013~%")
   (format *error-output* "@@ voice: ~:[none — set GLASS_VOICE~;~:*~a~]~%"
           (let ((var (find-symbol "*SPEECH-VOICE*" :glass)))
@@ -204,5 +208,5 @@
   ;; seat chose — see glass/docs/seats-and-transports.md.
   (clim-glass:run-wm '((:terminal :cols 80 :rows 24 :ppem 14))
                      :port 5903 :width 1280 :height 800
-                     :address "127.0.0.1"
+                     :address addr
                      :background wp :background-mode :cover))
