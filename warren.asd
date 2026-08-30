@@ -7,7 +7,11 @@ any VNC client, and single-click navigation builds cascading directory columns."
   :version "0.1.0"
   :author "ynniv"
   :license "MIT"
-  :depends-on ("gesso" "glass" "scribe" "pigment")
+  ;; sb-posix for ACCESS(2): a directory the process may not read comes back from
+  ;; UIOP as empty rather than as an error, and telling those apart is the whole job
+  ;; of LIST-DIR's second return value.  Looked up by name in fs.lisp, so this is a
+  ;; declaration that it will be there rather than a hard call into it.
+  :depends-on ("gesso" "glass" "scribe" "pigment" #+unix "sb-posix")
   :serial t
   :components
   ((:module "src"

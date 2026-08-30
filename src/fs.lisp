@@ -35,12 +35,37 @@
 ;;; ---------------------------------------------------------------------------
 ;;; Listing
 ;;; ---------------------------------------------------------------------------
+(defun %dir-readable-p (path)
+  "Can this process actually list PATH?
+
+   ASKED SEPARATELY, because the listing cannot answer it.  UIOP:SUBDIRECTORIES and
+   UIOP:DIRECTORY-FILES both return NIL for a directory they are not allowed to read,
+   WITHOUT signalling anything — so a HANDLER-CASE around them never fires, and an
+   unreadable directory arrives looking exactly like an empty one.  That is the single
+   distinction LIST-DIR exists to report, and it was quietly wrong: a folder somebody
+   has no permission for rendered as a folder with nothing in it.
+
+   Looked up by name so this file keeps its short dependency list, and answers T where
+   the platform has no such notion — there, everything is readable until it is not."
+  (let ((access (and (find-package "SB-POSIX") (find-symbol "ACCESS" "SB-POSIX")))
+        (r-ok (and (find-package "SB-POSIX") (find-symbol "R-OK" "SB-POSIX")))
+        (x-ok (and (find-package "SB-POSIX") (find-symbol "X-OK" "SB-POSIX"))))
+    (if (and access (fboundp access) r-ok (boundp r-ok) x-ok (boundp x-ok))
+        (handler-case
+            (progn (funcall access (string-right-trim "/" (namestring path))
+                            (logior (symbol-value r-ok) (symbol-value x-ok)))
+                   t)
+          (error () nil))
+        t)))
+
 (defun list-dir (path)
   "List directory PATH.  Returns (values entries readable-p): a list of ENTRY
    structs — directories first, then files, each group case-insensitively sorted
    by name — and a flag that is NIL when the directory could not be read.  Dotfiles
    are hidden unless *SHOW-HIDDEN*.  Never signals; an unreadable dir yields NIL
    entries and a NIL flag."
+  (unless (%dir-readable-p path)
+    (return-from list-dir (values nil nil)))
   (handler-case
       (let ((dirs '()) (files '()))
         (dolist (d (uiop:subdirectories path))
