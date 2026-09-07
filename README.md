@@ -52,10 +52,13 @@ a column to include them.
 `tests.lisp` runs the model assertions and writes three sample screenshots to
 `shots/`.
 
-`desktop-5903.lisp` is not part of the library — it is the author's own launcher,
-kept here because it is the only worked example of warren living inside a full
-[glass](https://github.com/modus-lisp/glass) desktop alongside other apps. Its
-paths are machine-specific; read it, don't run it.
+`desktop-5903.lisp` used to live here and has moved to `cortez/`. It was never
+part of the library — the author's own launcher, kept alongside warren because it
+was the only worked example of warren inside a full
+[glass](https://github.com/modus-lisp/glass) desktop. It is a whole-desktop
+composition rather than a warren file, and keeping it here meant every
+application that wanted a root-menu entry had to edit the file browser to get
+one. Its paths are machine-specific; read it, don't run it.
 
 ## Dependencies
 
