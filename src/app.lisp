@@ -50,6 +50,26 @@
 ;;; Async image-preview decoding (mirrors loom glass-shell's MAYBE-WARM-LAZY:
 ;;; decode OFF the lock on a worker, store under the lock, mark dirty)
 ;;; ---------------------------------------------------------------------------
+(defvar *preview-fn* nil
+  "NIL, or (lambda (path box-w box-h)) -> (values rgba w h) -- a thumbnail of PATH fitting the box, RGBA
+   octets row by row -- made by the HOST, on the thread that asks.  A phone sets it: there iOS makes
+   thumbnails natively in milliseconds, and a decode on a thread of warren's own is both refused (a
+   modus thread may not store into the app's tables) and larger than such a thread's heap.")
+
+(defun %host-preview (path)
+  "The preview through *PREVIEW-FN*: a PV, or :FAIL."
+  (multiple-value-bind (rgba w h)
+      (ignore-errors (funcall *preview-fn* path +preview-box-w+ +preview-box-h+))
+    (if (and rgba w h)
+        (multiple-value-bind (ow oh)
+            (ignore-errors
+             (with-open-file (s path :element-type '(unsigned-byte 8))
+               (let ((b (make-array (min 262144 (file-length s)) :element-type '(unsigned-byte 8))))
+                 (read-sequence b s)
+                 (probe-image-size b))))
+          (make-pv :img (pigment:make-img :w w :h h :rgba rgba) :ow (or ow w) :oh (or oh h)))
+        :fail)))
+
 (defun start-preview (app col)
   "Kick off (or reuse) the preview decode for the :info COL's image file.  MUST run
    under the app lock (the input path already holds it).  A cache hit resolves the
@@ -59,6 +79,8 @@
    column is CURRENT when it finishes, so a newer selection is never clobbered."
   (let* ((path (namestring (column-path col)))
          (hit (gethash path (app-preview-cache app))))
+    (when (and (not hit) *preview-fn*)                        ; the host makes it, here and now
+      (setf hit (setf (gethash path (app-preview-cache app)) (%host-preview path))))
     (cond
       (hit                                                     ; cached -> instant
        (if (pv-p hit)

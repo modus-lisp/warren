@@ -7,4 +7,4 @@
    ;; embeddable surface (host-owned framebuffer; e.g. a glass WM window)
    #:desktop-surface
    ;; user-tunable
-   #:*show-hidden*))
+   #:*show-hidden* #:*preview-fn*))
